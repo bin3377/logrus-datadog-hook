@@ -25,7 +25,7 @@ type Hook struct {
 	maxRetry int
 	buffer   [][]byte
 	m        sync.Mutex
-	ch       chan string
+	ch       chan []byte
 	err      error
 }
 
@@ -78,7 +78,7 @@ func NewHook(
 	if batchTimeout <= 0 {
 		batchTimeout = defaultTimeout
 	}
-	h.ch = make(chan string, 1)
+	h.ch = make(chan []byte, 1)
 	go h.pile(time.Tick(batchTimeout))
 	return h
 }
@@ -97,7 +97,13 @@ func (h *Hook) Levels() []logrus.Level {
 
 // Fire - implement Hook interface fire the entry
 func (h *Hook) Fire(entry *logrus.Entry) error {
-	line, err := entry.String()
+	var fn func(*logrus.Entry) ([]byte, error)
+	if h.isJSON {
+		fn = (&logrus.JSONFormatter{}).Format
+	} else {
+		fn = (&logrus.TextFormatter{DisableColors: true}).Format
+	}
+	line, err := fn(entry)
 	if err != nil {
 		dbg("Unable to read entry, %v", err)
 		return err
@@ -111,7 +117,8 @@ func (h *Hook) pile(ticker <-chan time.Time) {
 	size := 0
 	for {
 		select {
-		case str := <-h.ch:
+		case p := <-h.ch:
+			str := string(p)
 			if str == "" {
 				continue
 			}

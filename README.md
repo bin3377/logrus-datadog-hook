@@ -11,7 +11,6 @@ Shipping log entries from [logrus](https://github.com/sirupsen/logrus) to Datado
     hook := datadog.NewHook(datadog.DatadogUSHost, apiKey, true, 3, 5*time.Second)
     hook.Hostname = hostName
     l := logrus.New()
-    l.Formatter = &logrus.JSONFormatter{}
     l.Hooks.Add(hook)
     l.WithField("from", "unitest").Infof("TestSendingJSON - %d", i)
 ```
@@ -23,7 +22,6 @@ Shipping log entries from [logrus](https://github.com/sirupsen/logrus) to Datado
     hook := datadog.NewHook(datadog.DatadogUSHost, apiKey, false, 3, 5*time.Second)
     hook.Hostname = hostName
     l := logrus.New()
-    l.Formatter = &logrus.TextFormatter{DisableColors: true}
     l.Hooks.Add(hook)
     l.WithField("from", "unitest").Infof("TestSendingText - %d", i)
 ```

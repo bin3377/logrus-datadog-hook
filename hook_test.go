@@ -56,7 +56,6 @@ func getTextLogger(t *testing.T) (*Hook, *logrus.Logger) {
 	hook := NewHook(host, apiKey, false, 3, 5*time.Second)
 	hook.Hostname = hostName
 	l := logrus.New()
-	l.Formatter = &logrus.TextFormatter{DisableColors: true}
 	l.Hooks.Add(hook)
 	return hook, l
 }
@@ -77,7 +76,6 @@ func getJSONLogger(t *testing.T) (*Hook, *logrus.Logger) {
 	hook := NewHook(host, apiKey, true, 3, 5*time.Second)
 	hook.Hostname = hostName
 	l := logrus.New()
-	l.Formatter = &logrus.JSONFormatter{}
 	l.Hooks.Add(hook)
 	return hook, l
 }
