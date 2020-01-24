@@ -40,7 +40,7 @@ func equals(tb testing.TB, exp, act interface{}) {
 	}
 }
 
-func getTextLogger(t *testing.T) (*Hook, *logrus.Logger) {
+func getLogger(t *testing.T, isJSON bool) (*Hook, *logrus.Logger) {
 	host := os.Getenv("DATADOG_HOST")
 	apiKey := os.Getenv("DATADOG_APIKEY")
 	Debug = true
@@ -53,27 +53,7 @@ func getTextLogger(t *testing.T) (*Hook, *logrus.Logger) {
 	}
 
 	hostName, _ := os.Hostname()
-	hook := NewHook(host, apiKey, false, 3, 5*time.Second)
-	hook.Hostname = hostName
-	l := logrus.New()
-	l.Hooks.Add(hook)
-	return hook, l
-}
-
-func getJSONLogger(t *testing.T) (*Hook, *logrus.Logger) {
-	host := os.Getenv("DATADOG_HOST")
-	apiKey := os.Getenv("DATADOG_APIKEY")
-	Debug = true
-
-	if host == "" {
-		host = DatadogUSHost
-	}
-	if apiKey == "" {
-		t.Fatal("skipping test; DATADOG_APIKEY not set")
-	}
-
-	hostName, _ := os.Hostname()
-	hook := NewHook(host, apiKey, true, 3, 5*time.Second)
+	hook := NewHook(host, apiKey, isJSON, 3, 5*time.Second)
 	hook.Hostname = hostName
 	l := logrus.New()
 	l.Hooks.Add(hook)
@@ -81,7 +61,7 @@ func getJSONLogger(t *testing.T) (*Hook, *logrus.Logger) {
 }
 
 func TestHook(t *testing.T) {
-	hook, l := getTextLogger(t)
+	hook, l := getLogger(t, true)
 
 	for _, level := range hook.Levels() {
 		if len(l.Hooks[level]) != 1 {
@@ -90,7 +70,7 @@ func TestHook(t *testing.T) {
 	}
 }
 func TestSendingJSON(t *testing.T) {
-	_, l := getJSONLogger(t)
+	_, l := getLogger(t, true)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -106,7 +86,7 @@ func TestSendingJSON(t *testing.T) {
 }
 
 func TestSendingPlain(t *testing.T) {
-	_, l := getTextLogger(t)
+	_, l := getLogger(t, false)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
