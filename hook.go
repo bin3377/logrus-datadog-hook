@@ -12,21 +12,27 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Hook is the struct holding connect information to Datadog backend
-type Hook struct {
+// Options define the options for Datadog log stream
+type Options struct {
 	Source   string
 	Service  string
 	Hostname string
 	Tags     []string
+}
 
-	host     string
-	apiKey   string
-	isJSON   bool
-	maxRetry int
-	buffer   [][]byte
-	m        sync.Mutex
-	ch       chan []byte
-	err      error
+// Hook is the struct holding connect information to Datadog backend
+type Hook struct {
+	host      string
+	apiKey    string
+	maxRetry  int
+	formatter logrus.Formatter
+	minLevel  logrus.Level
+	options   Options
+
+	ch     chan []byte
+	buffer [][]byte
+	m      sync.Mutex
+	err    error
 }
 
 const (
@@ -64,19 +70,24 @@ var (
 func NewHook(
 	host string,
 	apiKey string,
-	isJSON bool,
-	maxRetry int,
 	batchTimeout time.Duration,
+	maxRetry int,
+	minLevel logrus.Level,
+	formatter logrus.Formatter,
+	options Options,
 ) *Hook {
+
 	h := &Hook{
-		host:     host,
-		apiKey:   apiKey,
-		isJSON:   isJSON,
-		maxRetry: maxRetry,
+		host:      host,
+		apiKey:    apiKey,
+		maxRetry:  maxRetry,
+		minLevel:  minLevel,
+		formatter: formatter,
+		options:   options,
 	}
 
-	if batchTimeout <= 0 {
-		batchTimeout = defaultTimeout
+	if batchTimeout < 5*time.Second {
+		batchTimeout = 5 * time.Second
 	}
 	h.ch = make(chan []byte, 1)
 	go h.pile(time.Tick(batchTimeout))
@@ -85,25 +96,12 @@ func NewHook(
 
 // Levels - implement Hook interface supporting all levels
 func (h *Hook) Levels() []logrus.Level {
-	return []logrus.Level{
-		logrus.PanicLevel,
-		logrus.FatalLevel,
-		logrus.ErrorLevel,
-		logrus.WarnLevel,
-		logrus.InfoLevel,
-		logrus.DebugLevel,
-	}
+	return logrus.AllLevels[:h.minLevel+1]
 }
 
 // Fire - implement Hook interface fire the entry
 func (h *Hook) Fire(entry *logrus.Entry) error {
-	var fn func(*logrus.Entry) ([]byte, error)
-	if h.isJSON {
-		fn = (&logrus.JSONFormatter{}).Format
-	} else {
-		fn = (&logrus.TextFormatter{DisableColors: true}).Format
-	}
-	line, err := fn(entry)
+	line, err := h.formatter.Format(entry)
 	if err != nil {
 		dbg("Unable to read entry, %v", err)
 		return err
@@ -122,7 +120,7 @@ func (h *Hook) pile(ticker <-chan time.Time) {
 			if str == "" {
 				continue
 			}
-			if h.isJSON {
+			if h.isJSON() {
 				str = strings.TrimRight(str, "\n")
 				str += ","
 			} else if !strings.HasSuffix(str, "\n") {
@@ -145,6 +143,20 @@ func (h *Hook) pile(ticker <-chan time.Time) {
 	}
 }
 
+func (h *Hook) isJSON() bool {
+	if _, ok := h.formatter.(*logrus.JSONFormatter); ok {
+		return true
+	} else if _, ok := h.formatter.(*logrus.TextFormatter); ok {
+		return false
+	}
+	b, err := h.formatter.Format(&logrus.Entry{})
+	if err != nil {
+		return false
+	}
+	str := strings.TrimSpace(string(b))
+	return strings.HasPrefix(str, "{") && strings.HasSuffix(str, "}")
+}
+
 func (h *Hook) send(pile [][]byte) {
 	h.m.Lock()
 	defer h.m.Unlock()
@@ -159,7 +171,7 @@ func (h *Hook) send(pile [][]byte) {
 	if len(buf) == 0 {
 		return
 	}
-	if h.isJSON {
+	if h.isJSON() {
 		if buf[len(buf)-1] == ',' {
 			buf = buf[:len(buf)-1]
 		}
@@ -176,7 +188,7 @@ func (h *Hook) send(pile [][]byte) {
 	}
 	header := http.Header{}
 	header.Add(apiKeyHeader, h.apiKey)
-	if h.isJSON {
+	if h.isJSON() {
 		header.Add("Content-Type", contentTypeJSON)
 	} else {
 		header.Add("Content-Type", contentTypePlain)
@@ -184,13 +196,20 @@ func (h *Hook) send(pile [][]byte) {
 	header.Add("charset", "UTF-8")
 	req.Header = header
 
-	for i := 0; i <= h.maxRetry; i++ {
+	i := 0
+	for {
 		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			dbg("%v", resp)
+		if err == nil && resp.StatusCode < 400 {
+			dbg("Success - %d", resp.StatusCode)
 			return
 		}
-		dbg(err.Error())
+		dbg("err  = %v", err)
+		dbg("resp = %v", resp)
+		i++
+		if h.maxRetry < 0 || i >= h.maxRetry {
+			dbg("Still failed after %d retries", i)
+			return
+		}
 	}
 }
 
@@ -202,17 +221,18 @@ func (h *Hook) datadogURL() string {
 	}
 	u.Path += basePath
 	parameters := url.Values{}
-	if h.Source != "" {
-		parameters.Add("ddsource", h.Source)
+	o := h.options
+	if o.Source != "" {
+		parameters.Add("ddsource", o.Source)
 	}
-	if h.Service != "" {
-		parameters.Add("service", h.Service)
+	if o.Service != "" {
+		parameters.Add("service", o.Service)
 	}
-	if h.Hostname != "" {
-		parameters.Add("hostname", h.Hostname)
+	if o.Hostname != "" {
+		parameters.Add("hostname", o.Hostname)
 	}
-	if h.Tags != nil {
-		tags := strings.Join(h.Tags, ",")
+	if o.Tags != nil {
+		tags := strings.Join(o.Tags, ",")
 		parameters.Add("ddtags", tags)
 	}
 	u.RawQuery = parameters.Encode()

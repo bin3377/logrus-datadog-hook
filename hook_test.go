@@ -1,6 +1,7 @@
 package datadog
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func equals(tb testing.TB, exp, act interface{}) {
 	}
 }
 
-func getLogger(t *testing.T, isJSON bool) (*Hook, *logrus.Logger) {
+func getLogger(t *testing.T, formatter logrus.Formatter) (*Hook, *logrus.Logger) {
 	host := os.Getenv("DATADOG_HOST")
 	apiKey := os.Getenv("DATADOG_APIKEY")
 	Debug = true
@@ -53,47 +54,31 @@ func getLogger(t *testing.T, isJSON bool) (*Hook, *logrus.Logger) {
 	}
 
 	hostName, _ := os.Hostname()
-	hook := NewHook(host, apiKey, isJSON, 3, 5*time.Second)
-	hook.Hostname = hostName
+	hook := NewHook(host, apiKey, 1*time.Second, 3, logrus.TraceLevel, formatter, Options{Hostname: hostName})
 	l := logrus.New()
+	l.Level = logrus.TraceLevel
 	l.Hooks.Add(hook)
 	return hook, l
 }
 
 func TestHook(t *testing.T) {
-	hook, l := getLogger(t, true)
-
+	hook, l := getLogger(t, &logrus.JSONFormatter{})
 	for _, level := range hook.Levels() {
 		if len(l.Hooks[level]) != 1 {
 			t.Errorf("Hook was not added. The length of l.Hooks[%v]: %v", level, len(l.Hooks[level]))
 		}
 	}
 }
-func TestSendingJSON(t *testing.T) {
-	_, l := getLogger(t, true)
+func TestSending(t *testing.T) {
+	_, l := getLogger(t, &logrus.JSONFormatter{TimestampFormat: time.RFC3339})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l.WithField("from", "unitest").Infof("TestSendingJSON - %d", i)
-		}()
-		time.Sleep(1 * time.Second)
-	}
-
-	wg.Wait()
-}
-
-func TestSendingPlain(t *testing.T) {
-	_, l := getLogger(t, false)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			l.WithField("from", "unitest").Infof("TestSendingPlain - %d", i)
+			w := l.WithField("from", "unitest").WriterLevel(logrus.Level(i%5 + 2))
+			fmt.Fprintf(w, "TestSending - %d\n", i)
 		}()
 		time.Sleep(1 * time.Second)
 	}
